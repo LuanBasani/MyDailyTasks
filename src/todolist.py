@@ -6,7 +6,7 @@ import sqlite3
 
 #======Criando BD=====
 def criar_banco():
-    conn = sqlite3.connect("database/tarefas.db")
+    conn = sqlite3.connect("tarefas.db")
     cursor = conn.cursor()
 
     cursor.execute("PRAGMA foreign_keys = ON")
