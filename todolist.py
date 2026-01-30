@@ -1,5 +1,4 @@
 #====Bibliotecas===
-
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -28,6 +27,7 @@ def criar_banco():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tarefas_criadas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feito INTEGER,
             nome TEXT NOT NULL,
             descricao TEXT,
             prioridade_id INTEGER,
@@ -56,6 +56,9 @@ def Criar_tarefa():
     rotulo_desc.pack(pady=5)
     entrada_desc = tk.Entry(nova_janela)
     entrada_desc.pack(pady=5)
+    
+    rotulo_prioridade = tk.Label(nova_janela, text="Selecione a prioridade:")
+    rotulo_prioridade.pack()
 
     #=====botoes de selecao da prioridade=====
 
@@ -67,87 +70,173 @@ def Criar_tarefa():
     
     tk.Radiobutton(nova_janela, text="Baixa", variable=valor_prioridade, value="baixa").pack()
 
-
+    #====Funçao para salvar entradas no banco de dados
     def salvar():
+        #=== pegar entradas ===
         nome = entrada_nome.get()
         desc = entrada_desc.get()
         prioridade_nome = valor_prioridade.get()
         
-
+        #====conecta ao banco===
         conn = sqlite3.connect("tarefas.db")
         cursor = conn.cursor()
 
         cursor.execute("PRAGMA foreign_keys = ON")
 
+        #=== verifica o nome com a tabela prioridade e pega id===
         cursor.execute(
             "SELECT id FROM prioridade WHERE nome = ?",
             (prioridade_nome,)
         )
         prioridade_id = cursor.fetchone()[0]
 
+        #==== insere os dados pego ====
         cursor.execute("""
             INSERT INTO tarefas_criadas (nome, descricao, prioridade_id)
             VALUES (?, ?, ?)
         """, (nome, desc, prioridade_id))
 
+        #==== fecha janela, salva e recarrega tabela ====
         nova_janela.destroy()
         conn.commit()
         conn.close()
+        carregar_tarefas()
 
+    #=== botao de salvar (puxa funçao) ====
     tk.Button(nova_janela, text="Salvar", command=salvar).pack(pady=10)
 
 
 
+#=== funçao para atualizar tabela de acordo com db===
+def carregar_tarefas():
+    #=== conecta ===
+    conn = sqlite3.connect("tarefas.db")
+    cursor = conn.cursor()
+
+    #=== cria apelido para tabelas e transforma id em nome da prioridade ===
+    cursor.execute("""
+        SELECT t.feito, t.nome, t.descricao, p.nome
+        FROM tarefas_criadas t
+        JOIN prioridade p ON t.prioridade_id = p.id
+    """)
+
+    dados = cursor.fetchall()
+    conn.close()
+
+    #====limpa a tabela====
+    for item in tabela.get_children():
+        tabela.delete(item)
+
+    #====insere os dados===
+    for feito, nome, desc, prioridade in dados:
+        checkbox = "☑" if feito == 1 else "☐"
+        tabela.insert("","end",values=(checkbox, nome, desc, prioridade, "Excluir"))
+
+
+
+#====Funçao para fazer clique na tabela====
+def clique_tabela(event):
+    #====reconhece o clique em colunas e linhas====
+    item = tabela.identify_row(event.y)
+    coluna = tabela.identify_column(event.x)
+
+    #====Reconhecer se o clique foi em uma linha válida====
+    if not item:
+        return
+
+    #====Transforma cada item das colunas em lista====
+    valores = list(tabela.item(item, "values"))
+
+    #====Transformar a coluna 1 em checkbox====
+    if coluna == "#1":
+    #==== Alternar em marcado ou nao====
+        if valores[0] == "☐":
+            valores[0] = "☑"
+            feito = 1
+        else:
+            valores[0] = "☐"
+            feito = 0
+
+        #====Atualiza a tabela====
+        tabela.item(item, values=valores)
+
+        #====Salva no banco de dados====
+        conn = sqlite3.connect("tarefas.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE tarefas_criadas SET feito = ? WHERE nome = ?",
+            (feito, valores[1])
+        )
+        conn.commit()
+        conn.close()
+
+    #====Se cliquer na coluna 5 excluir abre msgbox para confirmaçao de exclusao====
+    if coluna == "#5":
+        resposta = messagebox.askyesno(
+            "Confirmar",
+            "Deseja excluir esta tarefa?"
+        )
+        #====Deleta do banco de dados====
+        if resposta:
+            conn = sqlite3.connect("tarefas.db")
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM tarefas_criadas WHERE nome = ?",
+                (valores[1],)
+            )
+            conn.commit()
+            conn.close()
+            carregar_tarefas()
 
 #=====Funçao principal====
 
 def main():
 
-#=====Janela principal====
+    #=====Janela principal====
     global janela
     janela = tk.Tk()
     janela.title("MyDailyTasks")
     janela.geometry("600x700")
 
-    rotulo_titulo = tk.Label(janela,text="MyDailyTasks")
+    rotulo_titulo = tk.Label(janela,text="MyDailyTasks", font=("Arial", 18, "bold"), fg="#2ab17b",)
     rotulo_titulo.pack()
+   
 
-#====Check tarefa======
-    valor_check = tk.Variable()
-    tk.Checkbutton(janela, text="oi", variable=valor_check,).pack()
+    #====criar a tabela tarefas====
+    global tabela
+    tabela = ttk.Treeview(janela,columns=("feito", "nome", "descricao", "prioridade", "acoes"), show="headings")
 
-    tk.Checkbutton(janela, text="Saida", variable=valor_check, ).pack()
+    tabela.heading("feito", text="Feito")
+    tabela.heading("nome", text="Nome")
+    tabela.heading("descricao", text="Descrição")
+    tabela.heading("prioridade", text="Prioridade")
+    tabela.heading("acoes", text="Excluir")
+
+    tabela.column("feito", width=50, anchor="center")
+    tabela.column("nome", width=120)
+    tabela.column("descricao", width=200)
+    tabela.column("prioridade", width=80, anchor="center")
+    tabela.column("acoes", width=80, anchor="center")
+
+    tabela.pack(padx=10, pady=10, fill="both", expand=False)
+
+    #====Reconhecer clique na tabela====
+    tabela.bind("<Button-1>", clique_tabela)
 
 #====Botao criar tarefa======
 
-   
-
-#====criar a tabela tarefas====
-    global tabela
-    tabela = ttk.Treeview(janela,columns=(tk.Checkbutton, "nome","descricao","prioridade", tk.Button), show="headings")
-
-    tabela.heading(tk.Checkbutton, text="Feito")
-    tabela.heading("nome", text="Nome")
-    tabela.heading("descricao", text="Descriçao")
-    tabela.heading("prioridade", text="Prioridade")
-    tabela.heading(tk.Button,text="Excluir")
-
-    tabela.column(tk.Checkbutton, width=50)
-    tabela.column("nome", width=50)
-    tabela.column("descricao", width=100)
-    tabela.column("prioridade", width=40)
-    tabela.column(tk.Button, width=5)
-
-    tabela.pack(padx=10, pady=10, fill="both", expand=True)
-
-    botao_criar = tk.Button(janela, text="Criar nova tarefa", command=Criar_tarefa)
+    botao_criar = tk.Button(janela, text="Criar nova tarefa", bg="#0078d7", fg="white", activebackground="#005a9e", activeforeground="white", command=Criar_tarefa)
     botao_criar.pack(pady=15)
+
+#==== sempre recarrega a tabela qnd abre ====
+    carregar_tarefas()
 
 
 
 #====Loop=====
     janela.mainloop()
 
+#====Iniciar script====
 if __name__ == "__main__":
     criar_banco()
     main()
